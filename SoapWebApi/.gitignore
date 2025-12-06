@@ -1,0 +1,61 @@
+### .NET ###
+bin/
+obj/
+out/
+[Bb]uild/
+[Ll]ogs/
+
+# Pliki tymczasowe NuGet
+*.nupkg
+*.snupkg
+*.nuspec
+packages/
+*.nuget.props
+*.nuget.targets
+
+# Pliki konfiguracyjne buildów lokalnych
+*.user
+*.suo
+*.userprefs
+*.csproj.user
+*.vbproj.user
+
+# Dotnet CLI
+.project
+.global.json
+
+# ASP.NET / hosting
+wwwroot/lib/
+appsettings.Development.json
+appsettings.Local.json
+appsettings.*.local.json
+
+### JetBrains Rider ###
+# Folder z ustawieniami Ridera
+.idea/
+.idea/**
+
+# Rider caches
+*.DotSettings.user
+*.DotSettings
+.idea/.idea.*
+.idea/workspace.xml
+
+# Rider solutions
+.sln.iml
+
+### Systemowe ###
+# Windows / macOS / Linux
+Thumbs.db
+ehthumbs.db
+.DS_Store
+*.swp
+*.tmp
+*.temp
+*.bak
+*.orig
+
+# Backupy
+*~
+*.old
+*.backup
