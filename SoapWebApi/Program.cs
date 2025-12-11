@@ -24,13 +24,6 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-var imagesPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "images");
-if (!Directory.Exists(imagesPath))
-{
-    Directory.CreateDirectory(imagesPath);
-    app.Logger.LogInformation($"Created images directory: {imagesPath}");
-}
-
 app.UseServiceModel(serviceBuilder =>
 {
     serviceBuilder.AddService<MapService>(serviceOptions =>

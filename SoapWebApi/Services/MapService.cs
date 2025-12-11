@@ -7,7 +7,6 @@ namespace SoapWebApi.Services;
 
 public class MapService : IMapService
 {
-    private readonly string _mapImagePath;
     private readonly ILogger<MapService> _logger;
 
     private const double POLAND_MIN_LAT = 49.0;
@@ -15,12 +14,10 @@ public class MapService : IMapService
     private const double POLAND_MIN_LON = 14.1;
     private const double POLAND_MAX_LON = 24.2;
 
-    public MapService(ILogger<MapService> logger, IWebHostEnvironment env)
+    public MapService(ILogger<MapService> logger)
     {
         _logger = logger;
-        _mapImagePath = Path.Combine(env.ContentRootPath, "wwwroot", "images", "map.png");
-
-        _logger.LogInformation($"MapService initialized. Map path: {_mapImagePath}");
+        _logger.LogInformation("MapService initialized");
     }
 
     public string Ping()
@@ -36,17 +33,16 @@ public class MapService : IMapService
             _logger.LogInformation(
                 $"GetMapByPixelCoordinates: TopLeft({request.TopLeft.X}, {request.TopLeft.Y}), BottomRight({request.BottomRight.X}, {request.BottomRight.Y})");
 
-            if (!File.Exists(_mapImagePath))
+            if (request.ImageData.Length == 0)
             {
-                _logger.LogWarning($"Map image not found at: {_mapImagePath}");
                 return new MapResponse
                 {
                     Success = false,
-                    Message = $"Map image not found. Path: {_mapImagePath}"
+                    Message = "Image data is required"
                 };
             }
 
-            using var image = Image.Load(_mapImagePath);
+            using var image = Image.Load(request.ImageData);
 
             if (!ValidatePixelCoordinates(request, image.Width, image.Height))
             {
@@ -85,7 +81,7 @@ public class MapService : IMapService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to load map image");
+            _logger.LogError(ex, "Failed to process map image");
             return new MapResponse
             {
                 Success = false,
@@ -101,13 +97,12 @@ public class MapService : IMapService
             _logger.LogInformation(
                 $"GetMapByGeoCoordinates: TopLeft(Lat: {request.TopLeft.Latitude}, Lon: {request.TopLeft.Longitude}), BottomRight(Lat: {request.BottomRight.Latitude}, Lon: {request.BottomRight.Longitude})");
 
-            if (!File.Exists(_mapImagePath))
+            if (request.ImageData.Length == 0)
             {
-                _logger.LogWarning($"Map image not found at: {_mapImagePath}");
                 return new MapResponse
                 {
                     Success = false,
-                    Message = $"Map image not found. Path: {_mapImagePath}"
+                    Message = "Image data is required"
                 };
             }
 
@@ -120,7 +115,7 @@ public class MapService : IMapService
                 };
             }
 
-            using var image = Image.Load(_mapImagePath);
+            using var image = Image.Load(request.ImageData);
 
             var pixelTopLeft = GeoToPixel(
                 request.TopLeft.Latitude,
@@ -142,7 +137,8 @@ public class MapService : IMapService
             var pixelRequest = new PixelMapRequest
             {
                 TopLeft = pixelTopLeft,
-                BottomRight = pixelBottomRight
+                BottomRight = pixelBottomRight,
+                ImageData = request.ImageData
             };
 
             if (!ValidatePixelCoordinates(pixelRequest, image.Width, image.Height))
@@ -181,7 +177,7 @@ public class MapService : IMapService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to load map image from geo coordinates");
+            _logger.LogError(ex, "Failed to process map image from geo coordinates");
             return new MapResponse
             {
                 Success = false,
