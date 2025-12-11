@@ -10,4 +10,7 @@ public class GeoMapRequest
 
     [DataMember] 
     public GeoCoordinates BottomRight { get; set; } = null!;
+
+    [DataMember]
+    public byte[] ImageData { get; set; } = null!;
 }

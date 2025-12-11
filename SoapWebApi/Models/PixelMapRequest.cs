@@ -10,4 +10,7 @@ public class PixelMapRequest
 
     [DataMember] 
     public PixelCoordinates BottomRight { get; set; } = null!;
+
+    [DataMember]
+    public byte[] ImageData { get; set; } = null!;
 }
