@@ -30,10 +30,32 @@ public class MapService : IMapService
     {
         try
         {
+            // Defensive null checks to avoid NRE when deserialization fails
+            if (request == null)
+            {
+                _logger.LogWarning("GetMapByPixelCoordinates: request is null (deserialization failed)");
+                return new MapResponse
+                {
+                    Success = false,
+                    Message = "Invalid request: request is null"
+                };
+            }
+
+            if (request.TopLeft == null || request.BottomRight == null)
+            {
+                _logger.LogWarning(
+                    "GetMapByPixelCoordinates: TopLeft or BottomRight is null. Likely XML namespace mismatch in client request.");
+                return new MapResponse
+                {
+                    Success = false,
+                    Message = "Invalid request: TopLeft and BottomRight pixel coordinates are required"
+                };
+            }
+
             _logger.LogInformation(
                 $"GetMapByPixelCoordinates: TopLeft({request.TopLeft.X}, {request.TopLeft.Y}), BottomRight({request.BottomRight.X}, {request.BottomRight.Y})");
 
-            if (request.ImageData.Length == 0)
+            if (request.ImageData == null || request.ImageData.Length == 0)
             {
                 return new MapResponse
                 {

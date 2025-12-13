@@ -3,6 +3,11 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:xml/xml.dart' as xml;
+// Extracted views
+import 'main_menu_view.dart';
+import 'draw_rectangle_view.dart';
+import 'coordinate_map_view.dart';
+import 'result_map_view.dart';
 
 void main() {
   runApp(const MapSoapApp());
@@ -16,7 +21,13 @@ class MapSoapApp extends StatelessWidget {
     return MaterialApp(
       title: 'SOAP Map Client',
       theme: ThemeData(primarySwatch: Colors.blue),
-      home: const MapHomePage(),
+      // Set the new Main Menu as the entry point
+      home: const MainMenuView(),
+      routes: {
+        DrawRectangleView.routeName: (_) => const DrawRectangleView(),
+        CoordinateMapView.routeName: (_) => const CoordinateMapView(),
+        ResultMapView.routeName: (_) => const ResultMapView(),
+      },
     );
   }
 }
@@ -79,7 +90,7 @@ class _MapHomePageState extends State<MapHomePage> {
         </soapenv:Body>
       </soapenv:Envelope>''';
 
-      final response = await sendSoap('http://localhost:5265/MapService.svc',
+      final response = await sendSoap('http://10.0.2.2:5265/MapService.svc',
           'http://mapservice.soap.api/2024/IMapService/Ping', envelope);
       showDialog(
         context: context,
@@ -112,7 +123,7 @@ class _MapHomePageState extends State<MapHomePage> {
         </soapenv:Body>
       </soapenv:Envelope>''';
 
-      final response = await sendSoap('http://localhost:5265/MapService.svc',
+      final response = await sendSoap('http://10.0.2.2:5265/MapService.svc',
           'http://mapservice.soap.api/2024/IMapService/GetMapByPixelCoordinates', envelope);
       setState(() {
         imageBytes = extractImageFromSoap(response);
@@ -137,14 +148,14 @@ class _MapHomePageState extends State<MapHomePage> {
               </map:TopLeft>
               <map:BottomRight>
                 <map:Latitude>${bottomRightLatController.text}</map:Latitude>
-                <map:Longitude>${bottomRightLonController.text}</map:Longitude>
+                <map:Longitude>${bottomRightLonController.text}</map:Longitude>v
               </map:BottomRight>
             </map:request>
           </map:GetMapByGeoCoordinates>
         </soapenv:Body>
       </soapenv:Envelope>''';
 
-      final response = await sendSoap('http://localhost:5265/MapService.svc',
+      final response = await sendSoap('http://10.0.2.2:5265/MapService.svc',
           'http://mapservice.soap.api/2024/IMapService/GetMapByGeoCoordinates', envelope);
       setState(() {
         imageBytes = extractImageFromSoap(response);
