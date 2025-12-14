@@ -9,21 +9,38 @@ class MainMenuView extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Main Menu')),
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ElevatedButton(
-              onPressed: () => Navigator.pushNamed(context, DrawRectangleView.routeName),
-              child: const Text('Draw Rectangle'),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(
+            'assets/background.png',
+            fit: BoxFit.cover,
+          ),
+          Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                    foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                  ),
+                  onPressed: () => Navigator.pushNamed(context, DrawRectangleView.routeName),
+                  child: const Text('Draw Rectangle'),
+                ),
+                const SizedBox(height: 12),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                    foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                  ),
+                  onPressed: () => Navigator.pushNamed(context, CoordinateMapView.routeName),
+                  child: const Text('Coordinate Map'),
+                ),
+              ],
             ),
-            const SizedBox(height: 12),
-            ElevatedButton(
-              onPressed: () => Navigator.pushNamed(context, CoordinateMapView.routeName),
-              child: const Text('Coordinate Map'),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

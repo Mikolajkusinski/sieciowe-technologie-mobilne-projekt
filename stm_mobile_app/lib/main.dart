@@ -196,16 +196,16 @@ class _MapHomePageState extends State<MapHomePage> {
             const Text('Pixel Coordinates'),
             Row(
               children: [
-                Expanded(child: TextField(controller: topLeftXController, decoration: const InputDecoration(labelText: 'TopLeft X'))),
+                Expanded(child: TextField(controller: topLeftXController, decoration: const InputDecoration(labelText: 'TopLeft.X'))),
                 const SizedBox(width: 5),
-                Expanded(child: TextField(controller: topLeftYController, decoration: const InputDecoration(labelText: 'TopLeft Y'))),
+                Expanded(child: TextField(controller: topLeftYController, decoration: const InputDecoration(labelText: 'TopLeft.Y'))),
               ],
             ),
             Row(
               children: [
-                Expanded(child: TextField(controller: bottomRightXController, decoration: const InputDecoration(labelText: 'BottomRight X'))),
+                Expanded(child: TextField(controller: bottomRightXController, decoration: const InputDecoration(labelText: 'BottomRight.X'))),
                 const SizedBox(width: 5),
-                Expanded(child: TextField(controller: bottomRightYController, decoration: const InputDecoration(labelText: 'BottomRight Y'))),
+                Expanded(child: TextField(controller: bottomRightYController, decoration: const InputDecoration(labelText: 'BottomRight.Y'))),
               ],
             ),
             ElevatedButton(onPressed: getMapByPixel, child: const Text('Get Map (Pixel)')),

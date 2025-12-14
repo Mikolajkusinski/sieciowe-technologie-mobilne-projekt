@@ -2,7 +2,9 @@ using System.Runtime.Serialization;
 
 namespace SoapWebApi.Models;
 
-[DataContract]
+// Explicitly set the model namespace so member elements (TopLeft/BottomRight/ImageData)
+// are emitted/expected in the same namespace as other models (mirrors Pixel request)
+[DataContract(Namespace = "http://schemas.datacontract.org/2004/07/SoapWebApi.Models")]
 public class GeoMapRequest
 {
     [DataMember] 
