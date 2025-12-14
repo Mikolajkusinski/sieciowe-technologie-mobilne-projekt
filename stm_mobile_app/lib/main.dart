@@ -1,426 +1,280 @@
-import 'package:flutter/material.dart';
-import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:xml/xml.dart' as xml;
+// Extracted views
+import 'main_menu_view.dart';
+import 'draw_rectangle_view.dart';
+import 'coordinate_map_view.dart';
+import 'result_map_view.dart';
 
 void main() {
-  runApp(const MyApp());
+  runApp(const MapSoapApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class MapSoapApp extends StatelessWidget {
+  const MapSoapApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Map Client',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-      ),
-      home: const MapClientPage(),
+      title: 'SOAP Map Client',
+      theme: ThemeData(primarySwatch: Colors.blue),
+      // Set the new Main Menu as the entry point
+      home: const MainMenuView(),
+      routes: {
+        DrawRectangleView.routeName: (_) => const DrawRectangleView(),
+        CoordinateMapView.routeName: (_) => const CoordinateMapView(),
+        ResultMapView.routeName: (_) => const ResultMapView(),
+      },
     );
   }
 }
 
-class MapClientPage extends StatefulWidget {
-  const MapClientPage({super.key});
+class MapHomePage extends StatefulWidget {
+  const MapHomePage({super.key});
+
   @override
-  State<MapClientPage> createState() => _MapClientPageState();
+  State<MapHomePage> createState() => _MapHomePageState();
 }
 
-class _MapClientPageState extends State<MapClientPage> {
-  //CONFIG
-  final String soapEndpoint = 'http://<SERVER_ADDRESS>/MapService'; //TODO: endpoint
-  final String soapAction = 'getMapFragment';                       //TODO: SoapAction/NazwaMetody
-  final int originalWidth = 1000;                                   //Width oryginalnego obrazu
-  final int originalHeight = 1000;                                  //Height oryginalnego obrazu
-  //Bounding Box geograficzny mapy [top-left & bot-right]
-  final double topLeftLat = 99.9999;                                //TODO: wspolrzedne
-  final double topLeftLon = 99.9999;                                //TODO: -/-
-  final double botRightLat = 99.9999;                               //TODO: -/-
-  final double botLeftLon = 99.9999;                                //TODO: -/-
+class _MapHomePageState extends State<MapHomePage> {
+  // Pixel coordinates controllers
+  final topLeftXController = TextEditingController();
+  final topLeftYController = TextEditingController();
+  final bottomRightXController = TextEditingController();
+  final bottomRightYController = TextEditingController();
 
-  //Controllers for pixel coords
-  final TextEditingController x1Ctrl = TextEditingController();
-  final TextEditingController y1Ctrl = TextEditingController();
-  final TextEditingController x2Ctrl = TextEditingController();
-  final TextEditingController y2Ctrl = TextEditingController();
+  // Geo coordinates controllers
+  final topLeftLatController = TextEditingController();
+  final topLeftLonController = TextEditingController();
+  final bottomRightLatController = TextEditingController();
+  final bottomRightLonController = TextEditingController();
 
-  //Controllers for geographic coords
-  final TextEditingController lat1Ctrl = TextEditingController();
-  final TextEditingController lon1Ctrl = TextEditingController();
-  final TextEditingController lat2Ctrl = TextEditingController();
-  final TextEditingController lon2Ctrl = TextEditingController();
+  Uint8List? imageBytes; // tutaj przechowamy wynikowy obraz
 
-  Uint8List? receivedImage;
-  bool loading = false;
-  String logText = '';
+  // Mini-map variables
+  Offset? rectStart;
+  Offset? rectEnd;
 
-  //Minimap drawing state
-  Offset? dragStart;
-  Offset? dragCurrent;
-  GlobalKey miniMapKey = GlobalKey();
-
-  void appendLog(String s){
-    setState((){
-      logText = '${DateTime.now().toIso8601String()} - $s\n$logText';
-    });
-  }
-
-  //Build SOAP XML
-  String buildSoapRequest({int? x1, int? y1, int? x2, int? y2,
-    double? lat1, double? lon1, double? lat2, double? lon2}){
-    final builder = xml.XmlBuilder();
-    builder.processing('xml', 'version="1.0" encoding="utf-8"');
-    builder.element('soapenv:Envelope', namespace: {
-      'soapenv': 'http://schamas.xmlsoap.org/soap/envelope/',
-      'ns': 'http://service.example.com/' //TODO: zmienic na targetNamespace serwera
-
-    }, nest: () {
-      builder.element('soapenv:Header', nest: () {});
-      builder.element('soapenv:Body', nest: () {
-        builder.element('ns:$soapAction', nest: () {
-          if (x1 != null) builder.element('x1', nest: x1.toString());
-          if (y1 != null) builder.element('y1', nest: y1.toString());
-          if (x2 != null) builder.element('x2', nest: x2.toString());
-          if (y2 != null) builder.element('y2', nest: y2.toString());
-          if (lat1 != null) builder.element('lat1', nest: lat1.toString());
-          if (lon1 != null) builder.element('lon1', nest: lon1.toString());
-          if (lat2 != null) builder.element('lat2', nest: lat2.toString());
-          if (lon2 != null) builder.element('lon2', nest: lon2.toString());
-        });
-      });
-    });
-    return builder.buildDocument().toXmlString(pretty: false);
-  }
-
-  Future<void> sendRequestByPixels() async {
-    final int? x1 = int.tryParse(x1Ctrl.text);
-    final int? y1 = int.tryParse(y1Ctrl.text);
-    final int? x2 = int.tryParse(x2Ctrl.text);
-    final int? y2 = int.tryParse(y2Ctrl.text);
-
-    if (x1 == null || y1 == null || x2 == null || y2 == null) {
-      appendLog('Błędne wartości pikseli');
-      return;
+  // --- Wysyłanie SOAP request ---
+  Future<String> sendSoap(String url, String soapAction, String envelope) async {
+    final headers = {
+      'Content-Type': 'text/xml; charset=utf-8',
+      'SOAPAction': soapAction,
+    };
+    final resp = await http.post(Uri.parse(url), headers: headers, body: envelope);
+    if (resp.statusCode >= 200 && resp.statusCode < 300) {
+      return resp.body;
+    } else {
+      throw Exception('SOAP request failed: ${resp.statusCode}');
     }
-    await _sendSoapRequest(x1: x1, y1: y1, x2: x2, y2: y2);
   }
 
-  Future<void> sendRequestByGeo() async {
-    final double? lat1 = double.tryParse(lat1Ctrl.text);
-    final double? lon1 = double.tryParse(lon1Ctrl.text);
-    final double? lat2 = double.tryParse(lat2Ctrl.text);
-    final double? lon2 = double.tryParse(lon2Ctrl.text);
-
-    if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) {
-      appendLog('Błędne wartości geograficzne');
-      return;
-    }
-    await _sendSoapRequest(lat1: lat1, lon1: lon1, lat2: lat2, lon2: lon2);
+  // --- Parsowanie ImageData z SOAP response ---
+  Uint8List extractImageFromSoap(String soapBody) {
+    final document = xml.XmlDocument.parse(soapBody);
+    final node = document.findAllElements('ImageData').first;
+    return base64.decode(node.text);
   }
 
-  Future<void> _sendSoapRequest({int? x1, int? y1, int? x2, int? y2, double? lat1, double? lon1, double? lat2, double? lon2}) async {
-    setState(() => loading = true);
-    final xmlReq = buildSoapRequest(x1: x1, y1: y1, x2: x2, y2: y2, lat1: lat1, lon1: lon1, lat2: lat2, lon2: lon2);
-    appendLog('Request XML: $xmlReq');
-
+  // --- Wywołanie Ping ---
+  Future<void> doPing() async {
     try {
-      final resp = await http.post(
-        Uri.parse(soapEndpoint),
-        headers: {
-          'Content-Type': 'text/xml; charset=utf-8',
-          'SOAPAction': soapAction, // w zależności od serwera może być potrzebne pełne URI
-        },
-        body: xmlReq,
-      ).timeout(const Duration(seconds: 15));
+      final envelope = '''<?xml version="1.0"?>
+      <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+        xmlns:map="http://mapservice.soap.api/2024">
+        <soapenv:Body>
+          <map:Ping/>
+        </soapenv:Body>
+      </soapenv:Envelope>''';
 
-      appendLog('HTTP status: ${resp.statusCode}');
-      appendLog('Response body: ${resp.body}');
-
-      if (resp.statusCode == 200) {
-        // Parsujemy odpowiedź XML i wydobywamy Base64 (dostosuj nazwę tagu)
-        final doc = xml.XmlDocument.parse(resp.body);
-        // Znajdź pierwszy node z zawartością base64 — dopasuj ścieżkę w zależności od serwera
-        final base64Element = doc.findAllElements('return').isNotEmpty
-            ? doc.findAllElements('return').first
-            : (doc.findAllElements('imageBase64').isNotEmpty ? doc.findAllElements('imageBase64').first : null);
-
-        if (base64Element != null) {
-          final base64String = base64Element.text;
-          final bytes = base64Decode(base64String);
-          setState(() {
-            receivedImage = bytes;
-          });
-          appendLog('Odebrano obraz (rozmiar bajtów: ${bytes.length})');
-        } else {
-          appendLog('Nie znaleziono elementu z Base64 w odpowiedzi XML.');
-        }
-      } else {
-        appendLog('Błąd HTTP: ${resp.statusCode}');
-      }
-    } on TimeoutException {
-      appendLog('Timeout podczas wysyłania żądania');
+      final response = await sendSoap('http://10.0.2.2:5265/MapService.svc',
+          'http://mapservice.soap.api/2024/IMapService/Ping', envelope);
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(content: Text(response)),
+      );
     } catch (e) {
-      appendLog('Exception: $e');
-    } finally {
-      setState(() => loading = false);
+      debugPrint('Ping failed: $e');
     }
   }
 
-  // Konwersja tap -> pixel original
-  // displaySize = actual rendered size of the mini-map image
-  // originalWidth/Height - rozmiar oryginału obrazka w px.
-  Offset convertDisplayToOriginal(Offset displayTap, Size displaySize) {
-    final double scaleX = originalWidth / displaySize.width;
-    final double scaleY = originalHeight / displaySize.height;
-    final double realX = displayTap.dx * scaleX;
-    final double realY = displayTap.dy * scaleY;
-    return Offset(realX, realY);
-  }
+  // --- Wywołanie GetMapByPixelCoordinates ---
+  Future<void> getMapByPixel() async {
+    try {
+      final envelope = '''<?xml version="1.0"?>
+      <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+        xmlns:map="http://mapservice.soap.api/2024">
+        <soapenv:Body>
+          <map:GetMapByPixelCoordinates>
+            <map:request>
+              <map:TopLeft>
+                <map:X>${topLeftXController.text}</map:X>
+                <map:Y>${topLeftYController.text}</map:Y>
+              </map:TopLeft>
+              <map:BottomRight>
+                <map:X>${bottomRightXController.text}</map:X>
+                <map:Y>${bottomRightYController.text}</map:Y>
+              </map:BottomRight>
+            </map:request>
+          </map:GetMapByPixelCoordinates>
+        </soapenv:Body>
+      </soapenv:Envelope>''';
 
-  // Konwersja pomiędzy pixel <-> geo (prosta liniowa interpolacja)
-  // zakłada, że topLeftLatLon i bottomRightLatLon zdefiniowane w CONFIGu
-  Offset pixelToGeo(Offset pix) {
-    // pix.x w [0, originalWidth], pix.y w [0, originalHeight]
-    final double lonRange = bottomRightLon - topLeftLon;
-    final double latRange = topLeftLat - bottomRightLat; // lat maleje w dół
-    final double lon = topLeftLon + (pix.dx / originalWidth) * lonRange;
-    final double lat = topLeftLat - (pix.dy / originalHeight) * latRange;
-    return Offset(lat, lon);
-  }
-
-  Offset geoToPixel(double lat, double lon) {
-    final double lonRange = bottomRightLon - topLeftLon;
-    final double latRange = topLeftLat - bottomRightLat;
-    final double x = ((lon - topLeftLon) / lonRange) * originalWidth;
-    final double y = ((topLeftLat - lat) / latRange) * originalHeight;
-    return Offset(x, y);
-  }
-
-  void _onMiniMapPanStart(DragStartDetails details) {
-    final rb = miniMapKey.currentContext?.findRenderObject() as RenderBox?;
-    if (rb == null) return;
-    final local = rb.globalToLocal(details.globalPosition);
-    setState(() {
-      dragStart = local;
-      dragCurrent = local;
-    });
-  }
-
-  void _onMiniMapPanUpdate(DragUpdateDetails details) {
-    final rb = miniMapKey.currentContext?.findRenderObject() as RenderBox?;
-    if (rb == null) return;
-    final local = rb.globalToLocal(details.globalPosition);
-    setState(() {
-      dragCurrent = local;
-    });
-  }
-
-  void _onMiniMapPanEnd(DragEndDetails details) {
-    final rb = miniMapKey.currentContext?.findRenderObject() as RenderBox?;
-    if (rb == null || dragStart == null || dragCurrent == null) {
+      final response = await sendSoap('http://10.0.2.2:5265/MapService.svc',
+          'http://mapservice.soap.api/2024/IMapService/GetMapByPixelCoordinates', envelope);
       setState(() {
-        dragStart = null;
-        dragCurrent = null;
+        imageBytes = extractImageFromSoap(response);
       });
-      return;
+    } catch (e) {
+      debugPrint('GetMapByPixel failed: $e');
     }
-    final size = rb.size;
-    final p1 = convertDisplayToOriginal(dragStart!, size);
-    final p2 = convertDisplayToOriginal(dragCurrent!, size);
-
-    final left = p1.dx < p2.dx ? p1.dx : p2.dx;
-    final top = p1.dy < p2.dy ? p1.dy : p2.dy;
-    final right = p1.dx > p2.dx ? p1.dx : p2.dx;
-    final bottom = p1.dy > p2.dy ? p1.dy : p2.dy;
-
-    // Ustaw pola tekstowe px
-    x1Ctrl.text = left.floor().toString();
-    y1Ctrl.text = top.floor().toString();
-    x2Ctrl.text = right.ceil().toString();
-    y2Ctrl.text = bottom.ceil().toString();
-
-    // Ustaw pola geograficzne
-    final geoTL = pixelToGeo(Offset(left, top));
-    final geoBR = pixelToGeo(Offset(right, bottom));
-    lat1Ctrl.text = geoTL.dx.toStringAsFixed(6);
-    lon1Ctrl.text = geoTL.dy.toStringAsFixed(6);
-    lat2Ctrl.text = geoBR.dx.toStringAsFixed(6);
-    lon2Ctrl.text = geoBR.dy.toStringAsFixed(6);
-
-    setState(() {
-      dragStart = null;
-      dragCurrent = null;
-    });
-    appendLog('Zaznaczono prostokąt -> px: ($left,$top)-($right,$bottom), geo: (${geoTL.dx},${geoTL.dy})-(${geoBR.dx},${geoBR.dy})');
   }
 
-  @override
-  void dispose() {
-    x1Ctrl.dispose();
-    y1Ctrl.dispose();
-    x2Ctrl.dispose();
-    y2Ctrl.dispose();
-    lat1Ctrl.dispose();
-    lon1Ctrl.dispose();
-    lat2Ctrl.dispose();
-    lon2Ctrl.dispose();
-    super.dispose();
+  // --- Wywołanie GetMapByGeoCoordinates ---
+  Future<void> getMapByGeo() async {
+    try {
+      final envelope = '''<?xml version="1.0"?>
+      <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+        xmlns:map="http://mapservice.soap.api/2024">
+        <soapenv:Body>
+          <map:GetMapByGeoCoordinates>
+            <map:request>
+              <map:TopLeft>
+                <map:Latitude>${topLeftLatController.text}</map:Latitude>
+                <map:Longitude>${topLeftLonController.text}</map:Longitude>
+              </map:TopLeft>
+              <map:BottomRight>
+                <map:Latitude>${bottomRightLatController.text}</map:Latitude>
+                <map:Longitude>${bottomRightLonController.text}</map:Longitude>v
+              </map:BottomRight>
+            </map:request>
+          </map:GetMapByGeoCoordinates>
+        </soapenv:Body>
+      </soapenv:Envelope>''';
+
+      final response = await sendSoap('http://10.0.2.2:5265/MapService.svc',
+          'http://mapservice.soap.api/2024/IMapService/GetMapByGeoCoordinates', envelope);
+      setState(() {
+        imageBytes = extractImageFromSoap(response);
+      });
+    } catch (e) {
+      debugPrint('GetMapByGeo failed: $e');
+    }
+  }
+
+  // --- Mini-map gestures ---
+  void onPanStart(DragStartDetails details) {
+    setState(() {
+      rectStart = details.localPosition;
+      rectEnd = null;
+    });
+  }
+
+  void onPanUpdate(DragUpdateDetails details) {
+    setState(() {
+      rectEnd = details.localPosition;
+    });
+  }
+
+  void onPanEnd(DragEndDetails details) {
+    // TODO: przelicz rectStart/rectEnd na pixele oryginału i uzupełnij TextEditingController
   }
 
   @override
   Widget build(BuildContext context) {
-    final miniMap = GestureDetector(
-      onPanStart: _onMiniMapPanStart,
-      onPanUpdate: _onMiniMapPanUpdate,
-      onPanEnd: _onMiniMapPanEnd,
-      child: Container(
-        key: miniMapKey,
-        width: 320,
-        height: 320,
-        decoration: BoxDecoration(border: Border.all(width: 1, color: Colors.black26)),
-        child: Stack(
+    return Scaffold(
+      appBar: AppBar(title: const Text('SOAP Map Client')),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(12),
+        child: Column(
           children: [
-            Positioned.fill(
-              child: Image.asset('assets/map_thumbnail.png', fit: BoxFit.contain),
+            ElevatedButton(onPressed: doPing, child: const Text('Ping Server')),
+            const SizedBox(height: 20),
+            const Text('Pixel Coordinates'),
+            Row(
+              children: [
+                Expanded(child: TextField(controller: topLeftXController, decoration: const InputDecoration(labelText: 'TopLeft.X'))),
+                const SizedBox(width: 5),
+                Expanded(child: TextField(controller: topLeftYController, decoration: const InputDecoration(labelText: 'TopLeft.Y'))),
+              ],
             ),
-            Positioned.fill(
-              child: CustomPaint(
-                painter: _SelectionPainter(start: dragStart, current: dragCurrent),
+            Row(
+              children: [
+                Expanded(child: TextField(controller: bottomRightXController, decoration: const InputDecoration(labelText: 'BottomRight.X'))),
+                const SizedBox(width: 5),
+                Expanded(child: TextField(controller: bottomRightYController, decoration: const InputDecoration(labelText: 'BottomRight.Y'))),
+              ],
+            ),
+            ElevatedButton(onPressed: getMapByPixel, child: const Text('Get Map (Pixel)')),
+            const SizedBox(height: 20),
+            const Text('Geo Coordinates'),
+            Row(
+              children: [
+                Expanded(child: TextField(controller: topLeftLatController, decoration: const InputDecoration(labelText: 'TopLeft Lat'))),
+                const SizedBox(width: 5),
+                Expanded(child: TextField(controller: topLeftLonController, decoration: const InputDecoration(labelText: 'TopLeft Lon'))),
+              ],
+            ),
+            Row(
+              children: [
+                Expanded(child: TextField(controller: bottomRightLatController, decoration: const InputDecoration(labelText: 'BottomRight Lat'))),
+                const SizedBox(width: 5),
+                Expanded(child: TextField(controller: bottomRightLonController, decoration: const InputDecoration(labelText: 'BottomRight Lon'))),
+              ],
+            ),
+            ElevatedButton(onPressed: getMapByGeo, child: const Text('Get Map (Geo)')),
+            const SizedBox(height: 20),
+            if (imageBytes != null)
+              Image.memory(imageBytes!),
+            const SizedBox(height: 20),
+            const Text('Mini-map (draw rectangle)'),
+            Container(
+              width: 300,
+              height: 300,
+              color: Colors.grey[300],
+              child: GestureDetector(
+                onPanStart: onPanStart,
+                onPanUpdate: onPanUpdate,
+                onPanEnd: onPanEnd,
+                child: CustomPaint(
+                  painter: MiniMapPainter(rectStart, rectEnd),
+                  child: Image.asset('assets/thumb_map.png', fit: BoxFit.cover), // dodaj plik miniatury
+                ),
               ),
             ),
           ],
         ),
       ),
     );
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Map SOAP Client')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Left: Mini map
-                Column(
-                  children: [
-                    const Text('Mini map (draw rectangle):'),
-                    const SizedBox(height: 8),
-                    miniMap,
-                    const SizedBox(height: 8),
-                    ElevatedButton(
-                      onPressed: () {
-                        // If you'd like to clear fields
-                        x1Ctrl.clear();
-                        y1Ctrl.clear();
-                        x2Ctrl.clear();
-                        y2Ctrl.clear();
-                        lat1Ctrl.clear();
-                        lon1Ctrl.clear();
-                        lat2Ctrl.clear();
-                        lon2Ctrl.clear();
-                        appendLog('Wyczyszczono pola');
-                      },
-                      child: const Text('Clear fields'),
-                    ),
-                  ],
-                ),
-                const SizedBox(width: 12),
-                // Right: Params and result
-                Expanded(
-                  child: Column(
-                    children: [
-                      const Text('Pixel coordinates (int):', style: TextStyle(fontWeight: FontWeight.bold)),
-                      Row(children: [
-                        Expanded(child: TextField(controller: x1Ctrl, decoration: const InputDecoration(labelText: 'x1'))),
-                        const SizedBox(width: 8),
-                        Expanded(child: TextField(controller: y1Ctrl, decoration: const InputDecoration(labelText: 'y1'))),
-                      ]),
-                      Row(children: [
-                        Expanded(child: TextField(controller: x2Ctrl, decoration: const InputDecoration(labelText: 'x2'))),
-                        const SizedBox(width: 8),
-                        Expanded(child: TextField(controller: y2Ctrl, decoration: const InputDecoration(labelText: 'y2'))),
-                      ]),
-                      const SizedBox(height: 8),
-                      ElevatedButton(
-                        onPressed: loading ? null : sendRequestByPixels,
-                        child: loading ? const CircularProgressIndicator() : const Text('Send (pixels)'),
-                      ),
-                      const Divider(),
-                      const Text('Geographic coordinates (double):', style: TextStyle(fontWeight: FontWeight.bold)),
-                      Row(children: [
-                        Expanded(child: TextField(controller: lat1Ctrl, decoration: const InputDecoration(labelText: 'lat1'))),
-                        const SizedBox(width: 8),
-                        Expanded(child: TextField(controller: lon1Ctrl, decoration: const InputDecoration(labelText: 'lon1'))),
-                      ]),
-                      Row(children: [
-                        Expanded(child: TextField(controller: lat2Ctrl, decoration: const InputDecoration(labelText: 'lat2'))),
-                        const SizedBox(width: 8),
-                        Expanded(child: TextField(controller: lon2Ctrl, decoration: const InputDecoration(labelText: 'lon2'))),
-                      ]),
-                      const SizedBox(height: 8),
-                      ElevatedButton(
-                        onPressed: loading ? null : sendRequestByGeo,
-                        child: loading ? const CircularProgressIndicator() : const Text('Send (geo)'),
-                      ),
-                      const SizedBox(height: 12),
-                      const Text('Result image:'),
-                      Container(
-                        width: double.infinity,
-                        height: 300,
-                        color: Colors.black12,
-                        child: receivedImage == null
-                            ? const Center(child: Text('No image received yet'))
-                            : Image.memory(receivedImage!, fit: BoxFit.contain),
-                      ),
-                      const SizedBox(height: 8),
-                      Text('Logs:', style: const TextStyle(fontWeight: FontWeight.bold).copyWith()),
-                      Container(
-                        width: double.infinity,
-                        height: 180,
-                        padding: const EdgeInsets.all(8),
-                        color: Colors.black12,
-                        child: SingleChildScrollView(child: Text(logText)),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }
 
-// Painter to draw rectangle during selection
-class _SelectionPainter extends CustomPainter {
+class MiniMapPainter extends CustomPainter {
   final Offset? start;
-  final Offset? current;
-  _SelectionPainter({this.start, this.current});
+  final Offset? end;
+
+  MiniMapPainter(this.start, this.end);
+
   @override
   void paint(Canvas canvas, Size size) {
-    if (start == null || current == null) return;
-    final paint = Paint()
-      ..color = Colors.red.withOpacity(0.4)
-      ..style = PaintingStyle.fill;
-    final rect = Rect.fromPoints(start!, current!);
-    canvas.drawRect(rect, paint);
+    if (start != null && end != null) {
+      final rect = Rect.fromPoints(start!, end!);
+      final paint = Paint()
+        ..color = Colors.blue.withOpacity(0.3)
+        ..style = PaintingStyle.fill;
+      canvas.drawRect(rect, paint);
 
-    final border = Paint()
-      ..color = Colors.red
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2;
-    canvas.drawRect(rect, border);
+      final border = Paint()
+        ..color = Colors.blue
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2;
+      canvas.drawRect(rect, border);
+    }
   }
 
   @override
-  bool shouldRepaint(covariant _SelectionPainter oldDelegate) {
-    return oldDelegate.start != start || oldDelegate.current != current;
-  }
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }

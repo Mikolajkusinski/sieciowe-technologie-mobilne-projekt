@@ -7,20 +7,20 @@ namespace SoapWebApi.Services;
 
 public class MapService : IMapService
 {
-    private readonly string _mapImagePath;
     private readonly ILogger<MapService> _logger;
 
-    private const double POLAND_MIN_LAT = 49.0;
-    private const double POLAND_MAX_LAT = 54.9;
-    private const double POLAND_MIN_LON = 14.1;
-    private const double POLAND_MAX_LON = 24.2;
+    // Anchor bbox for the single base image 1000x1000
+    // Top-left geo anchor: (Lat 54.188424, Lon 19.387526)
+    // Bottom-right geo anchor: (Lat 54.164336, Lon 19.428238)
+    private const double ANCHOR_MIN_LAT = 54.164336; // bottom edge
+    private const double ANCHOR_MAX_LAT = 54.188424; // top edge
+    private const double ANCHOR_MIN_LON = 19.387526; // left edge
+    private const double ANCHOR_MAX_LON = 19.428238; // right edge
 
-    public MapService(ILogger<MapService> logger, IWebHostEnvironment env)
+    public MapService(ILogger<MapService> logger)
     {
         _logger = logger;
-        _mapImagePath = Path.Combine(env.ContentRootPath, "wwwroot", "images", "map.png");
-
-        _logger.LogInformation($"MapService initialized. Map path: {_mapImagePath}");
+        _logger.LogInformation("MapService initialized");
     }
 
     public string Ping()
@@ -33,20 +33,41 @@ public class MapService : IMapService
     {
         try
         {
-            _logger.LogInformation(
-                $"GetMapByPixelCoordinates: TopLeft({request.TopLeft.X}, {request.TopLeft.Y}), BottomRight({request.BottomRight.X}, {request.BottomRight.Y})");
-
-            if (!File.Exists(_mapImagePath))
+            // Defensive null checks to avoid NRE when deserialization fails
+            if (request == null)
             {
-                _logger.LogWarning($"Map image not found at: {_mapImagePath}");
+                _logger.LogWarning("GetMapByPixelCoordinates: request is null (deserialization failed)");
                 return new MapResponse
                 {
                     Success = false,
-                    Message = $"Map image not found. Path: {_mapImagePath}"
+                    Message = "Invalid request: request is null"
                 };
             }
 
-            using var image = Image.Load(_mapImagePath);
+            if (request.TopLeft == null || request.BottomRight == null)
+            {
+                _logger.LogWarning(
+                    "GetMapByPixelCoordinates: TopLeft or BottomRight is null. Likely XML namespace mismatch in client request.");
+                return new MapResponse
+                {
+                    Success = false,
+                    Message = "Invalid request: TopLeft and BottomRight pixel coordinates are required"
+                };
+            }
+
+            _logger.LogInformation(
+                $"GetMapByPixelCoordinates: TopLeft({request.TopLeft.X}, {request.TopLeft.Y}), BottomRight({request.BottomRight.X}, {request.BottomRight.Y})");
+
+            if (request.ImageData == null || request.ImageData.Length == 0)
+            {
+                return new MapResponse
+                {
+                    Success = false,
+                    Message = "Image data is required"
+                };
+            }
+
+            using var image = Image.Load(request.ImageData);
 
             if (!ValidatePixelCoordinates(request, image.Width, image.Height))
             {
@@ -85,7 +106,7 @@ public class MapService : IMapService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to load map image");
+            _logger.LogError(ex, "Failed to process map image");
             return new MapResponse
             {
                 Success = false,
@@ -98,16 +119,37 @@ public class MapService : IMapService
     {
         try
         {
-            _logger.LogInformation(
-                $"GetMapByGeoCoordinates: TopLeft(Lat: {request.TopLeft.Latitude}, Lon: {request.TopLeft.Longitude}), BottomRight(Lat: {request.BottomRight.Latitude}, Lon: {request.BottomRight.Longitude})");
-
-            if (!File.Exists(_mapImagePath))
+            // Defensive null checks to avoid NRE when deserialization fails or namespaces mismatch
+            if (request == null)
             {
-                _logger.LogWarning($"Map image not found at: {_mapImagePath}");
+                _logger.LogWarning("GetMapByGeoCoordinates: request is null (deserialization failed)");
                 return new MapResponse
                 {
                     Success = false,
-                    Message = $"Map image not found. Path: {_mapImagePath}"
+                    Message = "Invalid request: request is null"
+                };
+            }
+
+            if (request.TopLeft == null || request.BottomRight == null)
+            {
+                _logger.LogWarning(
+                    "GetMapByGeoCoordinates: TopLeft or BottomRight is null. Likely XML namespace mismatch in client request.");
+                return new MapResponse
+                {
+                    Success = false,
+                    Message = "Invalid request: TopLeft and BottomRight geo coordinates are required"
+                };
+            }
+
+            _logger.LogInformation(
+                $"GetMapByGeoCoordinates: TopLeft(Lat: {request.TopLeft.Latitude}, Lon: {request.TopLeft.Longitude}), BottomRight(Lat: {request.BottomRight.Latitude}, Lon: {request.BottomRight.Longitude})");
+
+            if (request.ImageData == null || request.ImageData.Length == 0)
+            {
+                return new MapResponse
+                {
+                    Success = false,
+                    Message = "Image data is required"
                 };
             }
 
@@ -116,11 +158,11 @@ public class MapService : IMapService
                 return new MapResponse
                 {
                     Success = false,
-                    Message = "Coordinates exceed Poland bounds"
+                    Message = "Coordinates exceed allowed bounds"
                 };
             }
 
-            using var image = Image.Load(_mapImagePath);
+            using var image = Image.Load(request.ImageData);
 
             var pixelTopLeft = GeoToPixel(
                 request.TopLeft.Latitude,
@@ -139,10 +181,17 @@ public class MapService : IMapService
             _logger.LogInformation(
                 $"Converted to pixels: TopLeft({pixelTopLeft.X}, {pixelTopLeft.Y}), BottomRight({pixelBottomRight.X}, {pixelBottomRight.Y})");
 
+            // Normalize rectangle if needed to be safe
+            var left = Math.Min(pixelTopLeft.X, pixelBottomRight.X);
+            var right = Math.Max(pixelTopLeft.X, pixelBottomRight.X);
+            var top = Math.Min(pixelTopLeft.Y, pixelBottomRight.Y);
+            var bottom = Math.Max(pixelTopLeft.Y, pixelBottomRight.Y);
+
             var pixelRequest = new PixelMapRequest
             {
-                TopLeft = pixelTopLeft,
-                BottomRight = pixelBottomRight
+                TopLeft = new PixelCoordinates { X = left, Y = top },
+                BottomRight = new PixelCoordinates { X = right, Y = bottom },
+                ImageData = request.ImageData
             };
 
             if (!ValidatePixelCoordinates(pixelRequest, image.Width, image.Height))
@@ -154,12 +203,12 @@ public class MapService : IMapService
                 };
             }
 
-            int width = pixelBottomRight.X - pixelTopLeft.X;
-            int height = pixelBottomRight.Y - pixelTopLeft.Y;
+            int width = right - left;
+            int height = bottom - top;
 
             image.Mutate(x => x.Crop(new Rectangle(
-                pixelTopLeft.X,
-                pixelTopLeft.Y,
+                left,
+                top,
                 width,
                 height
             )));
@@ -181,7 +230,7 @@ public class MapService : IMapService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to load map image from geo coordinates");
+            _logger.LogError(ex, "Failed to process map image from geo coordinates");
             return new MapResponse
             {
                 Success = false,
@@ -192,8 +241,10 @@ public class MapService : IMapService
 
     private PixelCoordinates GeoToPixel(double latitude, double longitude, int imageWidth, int imageHeight)
     {
-        double normalizedLon = (longitude - POLAND_MIN_LON) / (POLAND_MAX_LON - POLAND_MIN_LON);
-        double normalizedLat = (POLAND_MAX_LAT - latitude) / (POLAND_MAX_LAT - POLAND_MIN_LAT);
+        // Linear mapping based on anchors
+        double normalizedLon = (longitude - ANCHOR_MIN_LON) / (ANCHOR_MAX_LON - ANCHOR_MIN_LON);
+        // y-axis inversion for image coordinates (top=0): higher latitude -> smaller y
+        double normalizedLat = (ANCHOR_MAX_LAT - latitude) / (ANCHOR_MAX_LAT - ANCHOR_MIN_LAT);
 
         normalizedLon = Math.Max(0, Math.Min(1, normalizedLon));
         normalizedLat = Math.Max(0, Math.Min(1, normalizedLat));
@@ -225,21 +276,21 @@ public class MapService : IMapService
 
     private bool ValidateGeoCoordinates(GeoMapRequest request)
     {
-        bool isValid = request.TopLeft.Latitude >= POLAND_MIN_LAT &&
-                       request.TopLeft.Latitude <= POLAND_MAX_LAT &&
-                       request.BottomRight.Latitude >= POLAND_MIN_LAT &&
-                       request.BottomRight.Latitude <= POLAND_MAX_LAT &&
-                       request.TopLeft.Longitude >= POLAND_MIN_LON &&
-                       request.TopLeft.Longitude <= POLAND_MAX_LON &&
-                       request.BottomRight.Longitude >= POLAND_MIN_LON &&
-                       request.BottomRight.Longitude <= POLAND_MAX_LON &&
+        bool isValid = request.TopLeft.Latitude >= ANCHOR_MIN_LAT &&
+                       request.TopLeft.Latitude <= ANCHOR_MAX_LAT &&
+                       request.BottomRight.Latitude >= ANCHOR_MIN_LAT &&
+                       request.BottomRight.Latitude <= ANCHOR_MAX_LAT &&
+                       request.TopLeft.Longitude >= ANCHOR_MIN_LON &&
+                       request.TopLeft.Longitude <= ANCHOR_MAX_LON &&
+                       request.BottomRight.Longitude >= ANCHOR_MIN_LON &&
+                       request.BottomRight.Longitude <= ANCHOR_MAX_LON &&
                        request.TopLeft.Latitude > request.BottomRight.Latitude &&
                        request.TopLeft.Longitude < request.BottomRight.Longitude;
 
         if (!isValid)
         {
             _logger.LogWarning(
-                $"Invalid geo coordinates. Poland bounds: Lat({POLAND_MIN_LAT}-{POLAND_MAX_LAT}), Lon({POLAND_MIN_LON}-{POLAND_MAX_LON}), Request: TopLeft(Lat:{request.TopLeft.Latitude}, Lon:{request.TopLeft.Longitude}), BottomRight(Lat:{request.BottomRight.Latitude}, Lon:{request.BottomRight.Longitude})");
+                $"Invalid geo coordinates. Allowed bounds: Lat({ANCHOR_MIN_LAT}-{ANCHOR_MAX_LAT}), Lon({ANCHOR_MIN_LON}-{ANCHOR_MAX_LON}), Request: TopLeft(Lat:{request.TopLeft.Latitude}, Lon:{request.TopLeft.Longitude}), BottomRight(Lat:{request.BottomRight.Latitude}, Lon:{request.BottomRight.Longitude})");
         }
 
         return isValid;

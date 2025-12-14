@@ -23,4 +23,5 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/map_thumbnail.png
+    - assets/thumb_map.png
+    - assets/background.png
